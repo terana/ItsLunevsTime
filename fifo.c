@@ -10,6 +10,7 @@
 
 #define SIZE 100 // Block size
 #define NAMELEN 16 // 5 for pid, 10 for time, 1 for \0
+#define FIFOSIZE 8000
 static char *dispatch_fifo_name = ".dispatch_fifo_name";
 
 void CrashOnError(int err, char* descr) {
@@ -78,6 +79,34 @@ void GetFifoName(char name[NAMELEN]){
 	CrashOnError(err, "Error closing fifo");
 }
 
+int LoopAndWrite(int fd_fifo, char buf[SIZE], int n) {
+	int m;
+	for (int i = 0; i < 100000000; i++) {
+		errno = 0;
+		m = write(fd_fifo, buf, n);
+		CrashOnError(m < 0 && errno != 35, "Error writing file");
+		if (m > 0) {
+			return m;
+		}
+	}
+	CrashOnError(-1, "Error waiting too long to write file");
+	return -1;
+}
+
+int LoopAndRead(int fd_fifo, char buf [SIZE], int n) {
+	int m;
+	for (int i = 0; i < 100000000; i++){
+		errno = 0;
+		m = read(fd_fifo, buf, SIZE);
+		CrashOnError(m < 0 && errno != 35, "Error reading from fifo in loop");
+		if (m > 0){
+			return m;
+		}
+	}
+	CrashOnError(-1, "Error waiting too long to read from fifo");
+	return -1;
+}
+
 void Transmit(FILE *in) {
 	char name[NAMELEN];
 	int err;
@@ -90,20 +119,23 @@ void Transmit(FILE *in) {
 	CrashOnError(fd_fifo < 0, "Error getting the descriptor of fifo");
 
 	SendName(name);
-	//exit(1);
 	int fd_in = fileno(in);
 	CrashOnError(fd_in < 0, "Error getting the descriptor of file");
 
 	char buf [SIZE];
 	int n = 1;
 	int nw;
+
 	while(n > 0) {
 		n = read(fd_in, buf, SIZE);
 		CrashOnError(n < 0, "Error reading file");
 
-		//printf("writer %d\n", n);
+		errno = 0;
 		nw = write(fd_fifo, buf, n);
-		CrashOnError(nw < 0, "Error writing file");
+		if (nw < 0 && errno == 35){
+			nw = LoopAndWrite(fd_fifo, buf, n);
+		}
+		CrashOnError(nw < 0, "Error writing file1");
 	}
 	
 	err = close(fd_fifo);
@@ -125,7 +157,7 @@ void Recieve() {
 		printf("Error: nothing to print\n");
 		exit(1);
 	}
-	//exit(1);
+
  	int fd_fifo = open(name, O_RDONLY|O_NONBLOCK);
 	CrashOnError(fd_fifo < 0, "Error getting the descriptor of fifo");
 	sleep(1);
@@ -133,10 +165,13 @@ void Recieve() {
 	int nw;
 	char buf [SIZE];
 	while(n > 0) {
+		errno = 0;
 		n = read(fd_fifo, buf, SIZE);
+		if (n < 0 && errno == 35){
+			n = LoopAndRead(fd_fifo, buf, SIZE);
+		}
 		CrashOnError(n < 0, "Error reading from fifo");
 
-		//printf("reader %d\n", n);
 		nw = write(STDOUT_FILENO, buf, n);
 		CrashOnError(nw < 0, "Error writing to stdout");
 	} 
