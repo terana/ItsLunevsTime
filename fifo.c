@@ -11,7 +11,9 @@
 #define SIZE 100 // Block size
 #define NAMELEN 16 // 5 for pid, 10 for time, 1 for \0
 #define FIFOSIZE 8000
+
 static char *dispatch_fifo_name = ".dispatch_fifo_name";
+static char *magicmessage = "terana is awesome";
 
 void CrashOnError(int err, char* descr) {
 	if(err){
@@ -85,10 +87,10 @@ void Transmit(FILE *in) {
 
 	CreateIndividualName(name);
 	err = mkfifo(name, 0666);
-	CrashOnError(err, "Error creating main fifo");
+	CrashOnError(err, "Error creating unique fifo");
 
 	int fd_fifo1 = open(name, O_RDWR|O_NONBLOCK);
-	CrashOnError(fd_fifo1 < 0, "");
+	CrashOnError(fd_fifo1 < 0, "Error opening unique fifo the first time");
 
 	SendName(name);
 	//exit(1);
@@ -101,27 +103,31 @@ void Transmit(FILE *in) {
 	
 	//exit(1);
 	int fd_fifo2 = open(name, O_WRONLY);
-	CrashOnError(fd_fifo2 < 0, "Error getting the descriptor of fifo");
-
-	err = close(fd_fifo1);
-	CrashOnError(err, "");
-
+	CrashOnError(fd_fifo2 < 0, "Error opening unique fifo the second time");
 	err = fcntl(fd_fifo2, F_SETNOSIGPIPE, 0);
 	CrashOnError(err, "Error enabling sigpipe");
+
+	sleep(3);
+	err = close(fd_fifo1);
+	CrashOnError(err, "Error closing the rdwr descriptor");
+
 	//exit(1);
 	while(n > 0) {
 		n = read(fd_in, buf, SIZE);
 		CrashOnError(n < 0, "Error reading file");
 
 		nw = write(fd_fifo2, buf, n);		
-		CrashOnError(nw < 0, "Error writing file1");
+		CrashOnError(nw < 0, "Error writing in unique fifo");
 	}
-	
+
+	nw = write(fd_fifo2, magicmessage, strlen(magicmessage) + 1);
+	CrashOnError(nw < 0, "Error writing magic message");
+
 	err = close(fd_fifo2);
-	CrashOnError(err, "Error closing fifo");
+	CrashOnError(err, "Error closing second fifo descriptor");
 	
 	err = remove(name);
-	CrashOnError(err, "Error removing fifo");
+	CrashOnError(err, "Error removing unique fifo");
 
 	return;
 }
@@ -131,35 +137,40 @@ void Recieve() {
 	char name [NAMELEN];
 	GetFifoName(name);
 	//exit(1);
-	struct stat st;
-	if(stat(name, &st) != 0){
-		printf("Error: nothing to print\n");
-		exit(1);
-	}
+	//sleep(2);
 	
  	int fd_fifo = open(name, O_RDONLY|O_NONBLOCK);
-	CrashOnError(fd_fifo < 0, "Error getting the descriptor of fifo");
+	CrashOnError(fd_fifo < 0, "Error getting the descriptor of fifo to read");
 	//exit(1);
 	int n = 1;
 	int nw;
 	char buf [SIZE];
+	int success = 0;
 
-	sleep(1);
+	err = fcntl(fd_fifo, F_SETFL, 0);
+	CrashOnError(err, "Error going to Block mode in reciever");
+
 	while(n > 0) {
 		n = read(fd_fifo, buf, SIZE);
-		CrashOnError(n < 0, "Error reading from fifo");
+		CrashOnError(n < 0, "Error reading from unique fifo");
+		if ((n < SIZE) && strcmp (buf + n - strlen(magicmessage) - 1, magicmessage) == 0) {
+			success = 1;
+			n -= strlen(magicmessage) + 1;
+		}
 		//exit(1);
 		nw = write(STDOUT_FILENO, buf, n);
 		CrashOnError(nw < 0, "Error writing to stdout");
 	} 
 	
 	err = close(fd_fifo);
-	CrashOnError(err, "Error closing fifo");
+	CrashOnError(err, "Error closing unique fifo in reader");
 	
+	if (success == 0) {
+		printf("\nI don't want to work when terana is not awesome!\n 🔥🔥🔥🔥🔥\n");
+		exit(1);
+	}
 	return;
 }
-
-
 
 int main(int argc, char** argv) {
 	switch (argc) {
