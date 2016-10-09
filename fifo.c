@@ -79,34 +79,6 @@ void GetFifoName(char name[NAMELEN]){
 	CrashOnError(err, "Error closing fifo");
 }
 
-int LoopAndWrite(int fd_fifo, char buf[SIZE], int n) {
-	int m;
-	for (int i = 0; i < 100000000; i++) {
-		errno = 0;
-		m = write(fd_fifo, buf, n);
-		CrashOnError(m < 0 && errno != 35, "Error writing file");
-		if (m > 0) {
-			return m;
-		}
-	}
-	CrashOnError(-1, "Error waiting too long to write file");
-	return -1;
-}
-
-int LoopAndRead(int fd_fifo, char buf [SIZE], int n) {
-	int m;
-	for (int i = 0; i < 100000000; i++){
-		errno = 0;
-		m = read(fd_fifo, buf, SIZE);
-		CrashOnError(m < 0 && errno != 35, "Error reading from fifo in loop");
-		if (m > 0){
-			return m;
-		}
-	}
-	CrashOnError(-1, "Error waiting too long to read from fifo");
-	return -1;
-}
-
 void Transmit(FILE *in) {
 	char name[NAMELEN];
 	int err;
@@ -115,30 +87,37 @@ void Transmit(FILE *in) {
 	err = mkfifo(name, 0666);
 	CrashOnError(err, "Error creating main fifo");
 
-	int fd_fifo = open(name, O_RDWR|O_NONBLOCK);
-	CrashOnError(fd_fifo < 0, "Error getting the descriptor of fifo");
+	int fd_fifo1 = open(name, O_RDWR|O_NONBLOCK);
+	CrashOnError(fd_fifo1 < 0, "");
 
 	SendName(name);
+	//exit(1);
 	int fd_in = fileno(in);
 	CrashOnError(fd_in < 0, "Error getting the descriptor of file");
-
+	
 	char buf [SIZE];
 	int n = 1;
 	int nw;
+	
+	//exit(1);
+	int fd_fifo2 = open(name, O_WRONLY);
+	CrashOnError(fd_fifo2 < 0, "Error getting the descriptor of fifo");
 
+	err = close(fd_fifo1);
+	CrashOnError(err, "");
+
+	err = fcntl(fd_fifo2, F_SETNOSIGPIPE, 0);
+	CrashOnError(err, "Error enabling sigpipe");
+	//exit(1);
 	while(n > 0) {
 		n = read(fd_in, buf, SIZE);
 		CrashOnError(n < 0, "Error reading file");
 
-		errno = 0;
-		nw = write(fd_fifo, buf, n);
-		if (nw < 0 && errno == 35){
-			nw = LoopAndWrite(fd_fifo, buf, n);
-		}
+		nw = write(fd_fifo2, buf, n);		
 		CrashOnError(nw < 0, "Error writing file1");
 	}
 	
-	err = close(fd_fifo);
+	err = close(fd_fifo2);
 	CrashOnError(err, "Error closing fifo");
 	
 	err = remove(name);
@@ -151,27 +130,25 @@ void Recieve() {
 	int err;
 	char name [NAMELEN];
 	GetFifoName(name);
-
+	//exit(1);
 	struct stat st;
 	if(stat(name, &st) != 0){
 		printf("Error: nothing to print\n");
 		exit(1);
 	}
-
+	
  	int fd_fifo = open(name, O_RDONLY|O_NONBLOCK);
 	CrashOnError(fd_fifo < 0, "Error getting the descriptor of fifo");
-	sleep(1);
+	//exit(1);
 	int n = 1;
 	int nw;
 	char buf [SIZE];
-	while(n > 0) {
-		errno = 0;
-		n = read(fd_fifo, buf, SIZE);
-		if (n < 0 && errno == 35){
-			n = LoopAndRead(fd_fifo, buf, SIZE);
-		}
-		CrashOnError(n < 0, "Error reading from fifo");
 
+	sleep(1);
+	while(n > 0) {
+		n = read(fd_fifo, buf, SIZE);
+		CrashOnError(n < 0, "Error reading from fifo");
+		//exit(1);
 		nw = write(STDOUT_FILENO, buf, n);
 		CrashOnError(nw < 0, "Error writing to stdout");
 	} 
