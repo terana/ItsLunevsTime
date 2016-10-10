@@ -47,10 +47,10 @@ int main(int argc, char** argv)
 			{
 				struct msgbuf { 
         			long mtype;
-        			char *mtext;
+        			char mtext[1];
      			} msgst;
 				
-				int msg_size = msgrcv(msqid, &msgst, 0, i + 1, MSG_NOERROR);
+				int msg_size = msgrcv(msqid, &msgst, 1, i + 1, 0);
 				CrashOnError(msg_size == -1, "Error recieving message");
 				printf("child : %ld\n", i);
 				exit(0);
