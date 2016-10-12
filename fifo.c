@@ -97,6 +97,11 @@ void Transmit(FILE *in) {
 	int fd_in = fileno(in);
 	CrashOnError(fd_in < 0, "Error getting the descriptor of file");
 	
+	struct stat st;
+	err = fstat(fd_in, &st);
+	CrashOnError(err, "Error getting info about input file");
+	unsigned long long file_size = st.st_size;
+
 	char buf [SIZE];
 	int n = 1;
 	int nw;
@@ -112,6 +117,9 @@ void Transmit(FILE *in) {
 	CrashOnError(err, "Error closing the rdwr descriptor");
 
 	//exit(1);
+
+	nw = write(fd_fifo2, &file_size, sizeof(unsigned long long));
+	CrashOnError(nw < 0, "Error writing in unique fifo the size of file");
 	while(n > 0) {
 		n = read(fd_in, buf, SIZE);
 		CrashOnError(n < 0, "Error reading file");
@@ -119,9 +127,6 @@ void Transmit(FILE *in) {
 		nw = write(fd_fifo2, buf, n);		
 		CrashOnError(nw < 0, "Error writing in unique fifo");
 	}
-
-	nw = write(fd_fifo2, magicmessage, strlen(magicmessage) + 1);
-	CrashOnError(nw < 0, "Error writing magic message");
 
 	err = close(fd_fifo2);
 	CrashOnError(err, "Error closing second fifo descriptor");
@@ -145,18 +150,18 @@ void Recieve() {
 	int n = 1;
 	int nw;
 	char buf [SIZE];
-	int success = 0;
 
 	err = fcntl(fd_fifo, F_SETFL, 0);
 	CrashOnError(err, "Error going to Block mode in reciever");
 
+	unsigned long long file_size;
+	n = read(fd_fifo, &file_size, sizeof (unsigned long long));
+	unsigned long long act_size = 0;
+
 	while(n > 0) {
 		n = read(fd_fifo, buf, SIZE);
 		CrashOnError(n < 0, "Error reading from unique fifo");
-		if ((n < SIZE) && strcmp (buf + n - strlen(magicmessage) - 1, magicmessage) == 0) {
-			success = 1;
-			n -= strlen(magicmessage) + 1;
-		}
+		act_size += n;
 		//exit(1);
 		nw = write(STDOUT_FILENO, buf, n);
 		CrashOnError(nw < 0, "Error writing to stdout");
@@ -164,11 +169,12 @@ void Recieve() {
 	
 	err = close(fd_fifo);
 	CrashOnError(err, "Error closing unique fifo in reader");
-	
-	if (success == 0) {
-		printf("\nI don't want to work when terana is not awesome!\n 🔥🔥🔥🔥🔥\n");
+
+	if (act_size != file_size) {
+		printf("\nDon't belive this information! \nIt is not the correct file! \nIt seems like something went wrong during the transfering the data\n");
 		exit(1);
 	}
+
 	return;
 }
 
