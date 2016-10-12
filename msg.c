@@ -61,11 +61,11 @@ int main(int argc, char** argv)
 	struct msgbuf { 
         long mtype;
         char *mtext;
-     } msgst [n];
+     } msgst;
 	
 	for (i = 0; i < n; i++){
-		msgst[i].mtype = i + 1;
-		err = msgsnd(msqid, msgst + i, 1, 0);
+		msgst.mtype = i + 1;
+		err = msgsnd(msqid, &msgst, 1, 0);
 		CrashOnError(err == -1, "Error sending message");
 		waitpid(-1, NULL, 0);
 	}
