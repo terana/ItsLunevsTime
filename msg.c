@@ -34,39 +34,36 @@ int main(int argc, char** argv)
         }
 	
 	long i;
-	int par_pid = getpid();
 	int ch_id = 0;
 
-    int msqid1 = msgget(ftok("/tmp", 1), (IPC_CREAT | IPC_EXCL | 0666));
-    CrashOnError(msqid1 == -1, "Error initializing msg queue");
-
-    int msqid = msgget(ftok("/tmp/tmp", 1), (IPC_CREAT | IPC_EXCL | 0666));
+    int msqid = msgget(IPC_PRIVATE, (IPC_CREAT  | IPC_EXCL | 0666));
     CrashOnError(msqid == -1, "Error initializing msg queue");
 
     int err;
 	
-	struct msgbuftosnd { 
+    struct msgbuf { 
         long mtype;
         char *mtext;
-     } msgtosnd;
+    };
 
-    struct msgbuftorcv { 
-        long mtype;
-        char mtext[1];
-    } msgtorcv;
+	struct msgbuf msgtorcv;
+	struct msgbuf msgtosnd;
 
 	for (i = 0; i < n; i++)
 	{
 			ch_id = fork();
 			if(ch_id == 0) //child
 			{
-				err = msgrcv(msqid1, &msgtorcv, 1, i + 1, 0);
+				//printf("child %ld is waiting for msg\n", i);
+				err = msgrcv(msqid, &msgtorcv, 0, i + 1, 0);
 				CrashOnError(err == -1, "Error recieving message in child");
 				printf("child : %ld\n", i);
 
-				msgtosnd.mtype = i + 1;
-				err = msgsnd(msqid, &msgtosnd, 1, 0);
+				msgtosnd.mtype = i +  n + 1;
+				err = msgsnd(msqid, &msgtosnd, 0, 0);
 				CrashOnError(err == -1, "Error sending message in child");
+
+				//printf("child %ld has send\n", i);
 	
 				exit(0);
 			}
@@ -75,18 +72,18 @@ int main(int argc, char** argv)
 	
 	
 	for (i = 0; i < n; i++){
+		//printf("parent is sending to %ld child\n", i);
 		msgtosnd.mtype = i + 1;
-		err = msgsnd(msqid1, &msgtosnd, 1, 0);
+		err = msgsnd(msqid, &msgtosnd, 0, 0);
 		CrashOnError(err == -1, "Error sending message in parent");
 		
-		err = msgrcv(msqid, &msgtorcv, 1, i + 1, 0);
+		//printf("par has send to %ld child and is waiting to rcv\n", i);
+		err = msgrcv(msqid, &msgtorcv, 0, i + n + 1, 0);
 		CrashOnError(err == -1, "Error recieving message in parent");
+		//printf("par has recieved from %ld child\n", i);
 	}
 	
 	err = msgctl(msqid, IPC_RMID, NULL);
-	CrashOnError(err == -1, "Error removing message queue");
-
-	err = msgctl(msqid1, IPC_RMID, NULL);
 	CrashOnError(err == -1, "Error removing message queue");
 	return 0;
 }
