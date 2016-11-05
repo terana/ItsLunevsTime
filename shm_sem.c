@@ -11,7 +11,7 @@ static const int blsize = 100;
 static const int shmemsize = blsize + sizeof(int) + sizeof(char);
 static const int dispatch_shmsize = 5; //for pid_t
 
-static const int ftok_dispatch_id = 29;
+static const int ftok_dispatch_id = 30;
 static const char* ftok_path = "/tmp";
 static const int wnull_key = 100500;
 
@@ -30,11 +30,40 @@ void CrashOnError(int err, char* descr) {
 	}
 }
 
-void Init (int semid) {
+void SetEmpty (int semid) {
 	unsigned short values [3] = {1, 1, 0};
 	int err = semctl(semid, 0, SETALL, values);
+	CrashOnError(err, "#### semctl set empty failed");
+	printf("set empty\n");
+}
+
+void SetFull (int semid) {
+	unsigned short values [3] = {1, 0, 1};
+	int err = semctl(semid, 0, SETALL, values);
+	CrashOnError(err, "#### semctl set full failed");
+	printf("set full\n");
+}
+
+void TrInit (int semid) {
+	int err;
+	unsigned short values [3] = {1, 1, 1};
+	err = semctl(semid, 0, SETALL, values);
 	CrashOnError(err, "#### semctl init failed");
-	printf("init\n");
+
+	struct sembuf init =  (struct sembuf) {full, -1, SEM_UNDO};
+	err = semop(semid, &init, 1);
+	CrashOnError(err, "#### semop init failed in transmitter");
+	printf("tr init\n");
+}
+
+void RecInit (int semid) {
+	int err;
+	struct sembuf init [2];
+	init[1] =  (struct sembuf) {empty, -1, SEM_UNDO};
+	init[0] = (struct sembuf) {empty, 1, 0};
+	err = semop(semid, init, 2);
+	CrashOnError(err, "#### semop init failed in reciever");
+	printf("rec init\n");
 }
 
 void Producer_Enter(int semid) {
@@ -50,12 +79,14 @@ void Producer_Enter(int semid) {
 }
 
 void Producer_Exit(int semid) {
+	int err;
 	struct sembuf ext[2];
 	ext[0] = (struct sembuf) {mut, 1, SEM_UNDO};
-	ext[1] = (struct sembuf) {full, 1, SEM_UNDO};
+	ext[1] = (struct sembuf) {full, 1, 0};
 
-	int err = semop(semid, ext, 2);
+	err = semop(semid, ext, 2);
 	CrashOnError(err, "#### semop exit failed in transmitter");
+
 	unsigned short values [3];
 	err = semctl(semid, 0, GETALL, values);
 	printf ("pr exit mut %d | empty %d | full %d | id %d\n", values[0], values[1], values [2], semid);
@@ -79,11 +110,11 @@ void Consumer_Exit (int semid) {
 
 	struct sembuf ext[2];
 	ext[0] = (struct sembuf) {mut, 1, SEM_UNDO};
-	ext[1] = (struct sembuf) {empty, 1, SEM_UNDO};
+	ext[1] = (struct sembuf) {empty, 1, 0};
 
 	err = semop(semid, ext, 2);
 	CrashOnError(err, "#### semop exit failed in reciever");
-	//Init(semid);
+
 	unsigned short values [3];
 	err = semctl(semid, 0, GETALL, values);
 	printf ("con exit mut %d | empty %d | full %d | id %d\n", values[0], values[1], values [2], semid);
@@ -111,7 +142,7 @@ int GetDispatcherSemId() {
 		CrashOnError(dispatch_semid == -1, "#### dispatcher semget failed, sem exist");
 	} else {
 		CrashOnError(dispatch_semid == -1, "#### dispatcher semget failed");
-		Init(dispatch_semid);
+		SetEmpty(dispatch_semid);
 	}
 
 	unsigned short values [3];
@@ -126,7 +157,7 @@ void BroadcastPid() {
 
 	Producer_Enter(dispatch_semid);
 	*dispatch_shmem = getpid();
-	Producer_Exit(dispatch_semid);
+	SetFull(dispatch_semid);
 	printf("BroadcastPid %d\n", getpid());
 }
 
@@ -142,7 +173,7 @@ void Transmit(FILE *in){
 	CrashOnError(errno, "#### shmat failed in transmitter");
 	int semid = semget(key, 3, 0666 | IPC_CREAT); // sem0 for mutex, sem1 for empty, sem2 for full
 	CrashOnError(semid == -1, "#### semget failed in transmitter");
-	Init(semid);
+	TrInit(semid);
 	
 	int fd_in = fileno(in);
 	CrashOnError(fd_in < 0, "#### fileno(in) failed in transmitter"); 
@@ -192,9 +223,9 @@ int GetTransmitterPid(){
 	int *dispatch_shmem =  GetDispatcherShmem();
 	int dispatch_semid =  GetDispatcherSemId();
 
-	Consumer_Enter (dispatch_semid);
+	Consumer_Enter(dispatch_semid);
 	int pid = *dispatch_shmem;
-	Consumer_Exit (dispatch_semid);
+	SetEmpty (dispatch_semid);
 
 	printf("got pid %d\n", pid);
 	return(pid);
@@ -214,6 +245,7 @@ void Recieve() {
 	CrashOnError(errno, "#### shmat failed in reciever");
 	int semid = semget(key, 3, 0);
 	CrashOnError(semid == -1, "#### semget failed in reciever");
+	RecInit(semid);
 
 	char ts = transmitter_status_ok;
 	int n = 1;
