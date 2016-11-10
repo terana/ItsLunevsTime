@@ -40,24 +40,15 @@ void RememberByte() {
 
 void GotOne(int signumber) {
 	byte += offset;
-	if (offset == max_offset) {
-		offset = 1;
-		RememberByte();
-	} else {
-		offset = (offset << 1);
-	}
+	offset = (offset << 1);
 
 	int err = kill(ch_pid, SIGUSR1);
 	CrashOnError(err < 0, "Error telling child OK");
 }
 
 void GotZero(int signumber) {
-	if (offset == max_offset) {
-		offset = 1;
-		RememberByte();
-	} else {
-		offset = (offset << 1);
-	}
+	offset = (offset << 1);
+	
 	int err = kill(ch_pid, SIGUSR1);
 	CrashOnError(err < 0, "Error telling child OK");
 }
@@ -178,6 +169,10 @@ int main(int argc, char** argv) {
 
 	while(1) {
 		sigsuspend(&empty_set);
+		if (offset == 0){
+			offset = 1;
+			RememberByte();
+		}
 	}
 	
 	return 0;
