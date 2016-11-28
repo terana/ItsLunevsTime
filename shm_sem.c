@@ -11,7 +11,7 @@ static const int shmsize = blsize + sizeof(int) + sizeof(char);
 
 static const int ftok_id = 12;
 static const char* ftok_path = "/tmp";
-static const int ftok_tr_id = 5;
+static const int ftok_tr_id = 10;
 static const int ftok_rec_id = 6;
 
 static const int mut = 0; //the index in semaphore array
@@ -63,7 +63,7 @@ char *GetShmem() {
 
 int GetSharedSemId() {
 	int key = ftok (ftok_path, ftok_id);
-	CrashOnError(key == -1, "#### ftok for semid failed"); 
+	CrashOnError(key == -1, "#### ftok for shared semid failed"); 
 	int semid = semget(key, 3, 0666 | IPC_CREAT); // sem0 for mutex, sem1 for empty, sem2 for full
 
 	return semid;
@@ -133,7 +133,7 @@ void TrInit (int semid) {
 	int err;
 	unsigned short values [3] = {1, 1, 0};
 	err = semctl(semid, 0, SETALL, values);
-	CrashOnError(err, "#### semctl init failed");
+	CrashOnError(err, "#### semctl init failed in TRInit");
 
 	struct sembuf init [2];
 	init [0] =  (struct sembuf) {full, 2, 0};
@@ -159,14 +159,11 @@ void Transmit (FILE *in) {
 	int err;
 
 	int tr_semid = GetTransmitterSemId();
-	int pid = semctl(tr_semid, 0, GETPID);
-	CrashOnError(pid < 0, "#### semctl failed getting pid of last transmitter");
-	if (pid == 0) {
-		SetOne(tr_semid);
-	}
-	struct sembuf enter = {0, -1, SEM_UNDO};
-	err = semop(tr_semid, &enter, 1);
-	CrashOnError(err < 0, "#### error entering sem");
+	struct sembuf enter[2];
+	enter[0] = (struct sembuf) {0, 0, 0};
+	enter[1] = (struct sembuf) {0, 1, SEM_UNDO};
+	err = semop(tr_semid, enter, 2);
+	CrashOnError(err < 0, "#### error entering transmitter sem");
 
 	int semid = GetSharedSemId();
 	char *shmem = GetShmem();
@@ -174,7 +171,7 @@ void Transmit (FILE *in) {
 
 	int rec_semid = GetRecieverSemId();
 	SetOne(rec_semid);
-
+	exit(1);
 	int fd_in = fileno(in);
 	CrashOnError(fd_in < 0, "#### fileno(in) failed in transmitter"); 
 	int n = 1;
