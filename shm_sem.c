@@ -69,9 +69,12 @@ int GetSharedSemId() {
 	return semid;
 }
 
-void SetOne(int semid) {
-	int err = semctl(semid, 0, SETVAL, 1);
-	CrashOnError(err < 0, "#### semctl failed setting 1 to sem");
+void LetRecieverIn(int semid) {
+	int err;
+	struct sembuf add_one;
+	add_one = (struct sembuf) {0, 1, SEM_UNDO};
+	err = semop(semid, &add_one, 1);
+	CrashOnError(err < 0, "#### error letting reciever in");
 }
 
 void Producer_Enter(int semid) {
@@ -129,11 +132,11 @@ void Consumer_Exit (int semid) {
 	// printf ("con exit mut %d | empty %d | full %d | id %d\n", values[0], values[1], values [2], semid);
 }
 
-void TrInit (int semid) {
+void TrInitShSems (int semid) {
 	int err;
 	unsigned short values [3] = {1, 1, 0};
 	err = semctl(semid, 0, SETALL, values);
-	CrashOnError(err, "#### semctl init failed in TRInit");
+	CrashOnError(err, "#### semctl init failed in TrInitShSems");
 
 	struct sembuf init [2];
 	init [0] =  (struct sembuf) {full, 2, 0};
@@ -143,7 +146,7 @@ void TrInit (int semid) {
 	//printf("tr init\n");
 }
 
-void RecInit (int semid) {
+void RecInitShSems (int semid) {
 	int err;
 
 	struct sembuf init [2];
@@ -167,11 +170,11 @@ void Transmit (FILE *in) {
 
 	int semid = GetSharedSemId();
 	char *shmem = GetShmem();
-	TrInit(semid);
+	TrInitShSems(semid);
 
 	int rec_semid = GetRecieverSemId();
-	SetOne(rec_semid);
-	exit(1);
+	LetRecieverIn(rec_semid);
+	
 	int fd_in = fileno(in);
 	CrashOnError(fd_in < 0, "#### fileno(in) failed in transmitter"); 
 	int n = 1;
@@ -197,6 +200,7 @@ void Transmit (FILE *in) {
 		if(first_time){
 			first_time = 0;
 		}
+		
 		Producer_Exit(semid);
 	}
 }
@@ -214,7 +218,7 @@ void Recieve() {
 	char *shmem = GetShmem();
 	int semid = GetSharedSemId();
 
-	RecInit(semid);
+	RecInitShSems(semid);
 
 	char ts = transmitter_status_ok;
 	int n = 1;
