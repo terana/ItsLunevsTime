@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <signal.h>
 
 void CrashOnError(int err, char *descr)
 {
@@ -21,7 +22,7 @@ void CrashOnError(int err, char *descr)
 	}
 }
 
-static int blsize;
+static size_t blsize = 32768;
 
 struct Pipe
 {
@@ -32,12 +33,12 @@ struct Pipe
 struct Buffer
 {
 	char *buffer;
-	int  Capacity;
+	size_t  Capacity;
 	int  AvailableToWrite;
 	char *CurrentPosition;
 };
 
-void NewBuffer(struct Buffer *buf, int capacity)
+void NewBuffer(struct Buffer *buf, size_t capacity)
 {
 	buf->buffer           = calloc(capacity, sizeof(char));
 	buf->Capacity         = capacity;
@@ -78,7 +79,7 @@ struct Connection
 	int readyToClose;
 };
 
-void PushThrough(int read_fd, int write_fd)
+void PushThrough(int id, int read_fd, int write_fd)
 {
 	int  err;
 	char *buf = malloc(blsize * sizeof(char));
@@ -87,6 +88,10 @@ void PushThrough(int read_fd, int write_fd)
 	int wr;
 	while (rd > 0)
 	{
+		if (id == 1)
+			sleep(1);
+		//else if (id == 2)
+		//	sleep(2);
 
 		rd = read(read_fd, buf, blsize);
 		CrashOnError(rd < 0, "Error reading");
@@ -115,11 +120,18 @@ void FillSets(struct fd_set *write_set, struct fd_set *read_set, struct Connecti
 	long i;
 	FD_ZERO(read_set);
 	FD_ZERO(write_set);
+
 	for (i = from; i < to; i++)
 	{
-		FD_SET(conn[i].read_fd, read_set);
+		if (conn[i].buf.AvailableToWrite == 0)
+		{
+			FD_SET(conn[i].read_fd, read_set);
+		}
 		//	printf("added %d\n", conn[i].read_fd);
-		FD_SET(conn[i].write_fd, write_set);
+		if (conn[i].buf.AvailableToWrite != 0)
+		{
+			FD_SET(conn[i].write_fd, write_set);
+		}
 		//printf("added %d\n", conn[i].write_fd);
 
 	}
@@ -137,6 +149,7 @@ int main(int argc, char const *argv[])
 	errno = 0;
 	long n = strtol(argv[1], &endptr, 10);
 	CrashOnError(errno, "The number of children is not correct");
+	CrashOnError(n < 1, "The number of children is not correct");
 
 	int fd_in = open(argv[2], O_RDONLY);
 	CrashOnError(fd_in < 0, "Error opening file");
@@ -146,15 +159,14 @@ int main(int argc, char const *argv[])
 
 	struct Connection *conn = calloc(n + 1, sizeof(struct Connection));
 	conn[0].read_fd = fd_in;
-	int size = 3;
+	conn[n].write_fd     = STDOUT_FILENO;
+	size_t size = 3;
 	for (i = n; i >= 0; i--)
 	{
 		NewBuffer(&conn[i].buf, size);
 		size *= 3;
+		conn[n].readyToClose = 0;
 	}
-	blsize = size;
-	conn[n].write_fd     = STDOUT_FILENO;
-	conn[n].readyToClose = 0;
 
 	struct fd_set read_set;
 	struct fd_set write_set;
@@ -189,7 +201,7 @@ int main(int argc, char const *argv[])
 			err = close(child_out.read_fd);
 			CrashOnError(err, "Error closing pipe in child");
 
-			PushThrough(child_in.read_fd, child_out.write_fd);
+			PushThrough(i, child_in.read_fd, child_out.write_fd);
 
 			return 0;
 		}
@@ -200,8 +212,6 @@ int main(int argc, char const *argv[])
 			CrashOnError(err, "Error closing pipe in parent");
 			err = close(child_out.write_fd);
 			CrashOnError(err, "Error closing pipe in parent");
-
-			conn[i].readyToClose = 0;
 
 			conn[i].pid_out    = ch_pid;
 			conn[i + 1].pid_in = ch_pid;
@@ -224,9 +234,11 @@ int main(int argc, char const *argv[])
 
 	struct timespec timeout;
 
-
 	int wr;
 	int rd;
+
+	sigset_t full_set;
+	sigfillset(&full_set);
 
 	int numberOfReadyFD;
 	long tail = -1;
@@ -235,9 +247,9 @@ int main(int argc, char const *argv[])
 		FillSets(&write_set, &read_set, conn, tail + 1, n + 1);
 		timeout.tv_sec  = 0;
 		timeout.tv_nsec = 0;
-		numberOfReadyFD = pselect(maxfd + 1, &read_set, &write_set, NULL, &timeout, NULL);
+		numberOfReadyFD = pselect(maxfd + 1, &read_set, &write_set, NULL, NULL, &full_set);
 		CrashOnError(numberOfReadyFD < 0, "Error in pselect");
-
+		//printf("ready %d\n", numberOfReadyFD);
 		for (i = tail + 1; i <= n; i++)
 		{
 			if (FD_ISSET(conn[i].read_fd, &read_set))
